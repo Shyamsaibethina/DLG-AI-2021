@@ -21,7 +21,6 @@ if resume:
 else:
   model = {}
   model['W1'] = np.random.randn(H,D) / np.sqrt(D) # "Xavier" initialization
-  # print(model['W1'])
   model['W2'] = np.random.randn(H) / np.sqrt(H) #Divide by square root of number of dimension size to normalize weights
 
 grad_buffer = { k : np.zeros_like(v) for k,v in model.items() } # update buffers that add up gradients over a batch
@@ -29,7 +28,6 @@ rmsprop_cache = { k : np.zeros_like(v) for k,v in model.items() } # rmsprop memo
 # np.zeros_like - Return an array of zeros with the same shape and type as a given array.
 
 def sigmoid(x): 
-    # print(x)
     return 1.0 / (1.0 + np.exp(-x)) # sigmoid "squashing" function to interval [0,1]
 
 
@@ -53,84 +51,79 @@ def discount_rewards(rewards):
     discounted_r[t] = running_add
   return discounted_r
 
+# TODO: understand and rename (if needed) logp
 def policy_forward(change_in_frame):
   hidden_layer_values = np.dot(model['W1'], change_in_frame)
-  print(change_in_frame[3200:])
-  #print(h)
   hidden_layer_values[hidden_layer_values<0] = 0 # ReLU nonlinearity
-  #print("hidden_layer1_values is: ", hidden_layer1_values)
   logp = np.dot(model['W2'], hidden_layer_values)
-  #print(logp)
-  output_probability = sigmoid(logp)
-  # print(output_probability)
-  return output_probability, hidden_layer_values # return probability of taking action 2, and hidden state
+  up_prob = sigmoid(logp)
+  return up_prob, hidden_layer_values # return probability of taking action 2, and hidden state
 
-def policy_backward(eph, epdlogp):
-  """ backward pass. (eph is array of intermediate hidden states) """
-  #eph.T and dh.T are the transposed matrices of eph and dh, respectively
-  dW2 = np.dot(eph.T, epdlogp).ravel()
-  #print("eph is: ", eph)          # What is the difference between eph and eph.T?
-  #print("eph.T is:", eph.T)       # We probably have to fully understand the backpropagation equation to understand this function
-  #print("epdlogp is:", epdlogp)
-  dh = np.outer(epdlogp, model['W2'])
-  #print("dh is: ", dh)
-  #print("dh.T is: ", dh.T)
-  dh[eph <= 0] = 0 # backpro prelu
-  dW1 = np.dot(dh.T, epx)
-  return {'W1':dW1, 'W2':dW2}
+# TODO: understand and rename (if needed) dh
+# dC_dw1: derivative of the cost / derivative of the weights 1 --> partial derivative
+# dC_dw2: derivative of the cost / derivative of the weights 2 --> partial derivative
+#comb_ep_hidden_layer_values.T and dh.T are the transposed matrices of comb_ep_hidden_layer_values and dh, respectively
+def policy_backward(comb_ep_hidden_layer_values, comb_ep_gradient_log_ps):
+  """ backward pass. (comb_ep_hidden_layer_values is array of intermediate hidden states) """
+  dC_dw2 = np.dot(comb_ep_hidden_layer_values.T, comb_ep_gradient_log_ps).ravel()
+  dh = np.outer(comb_ep_gradient_log_ps, model['W2'])
+  dh[comb_ep_hidden_layer_values <= 0] = 0 # backpro prelu
+  dC_dw1 = np.dot(dh.T, comb_ep_observations)
+  return {'W1':dC_dw1, 'W2':dC_dw2}
 
 env = gym.make("Pong-v0")
 observation = env.reset() # gets very first image of the game
-prev_x = None # used in computing the difference frame
-xs,hs,dlogps,drs = [],[],[],[]
+prev_frame = None # used in computing the difference frame 
+ep_observations,ep_hidden_layer_values,ep_gradient_log_ps,ep_rewards = [],[],[],[]
+
 running_reward = None
 reward_sum = 0
 episode_number = 0
+
 while True:
   if render: 
     env.render()
     #time.sleep(0.5)
 
   # preprocess the observation, set input to network to be difference image
-  cur_x = prepro(observation)
-  change_in_frame = cur_x - prev_x if prev_x is not None else np.zeros(D)
-  prev_x = cur_x
+  curr_frame = prepro(observation)
+  change_in_frame = curr_frame - prev_frame if prev_frame is not None else np.zeros(D)
+  prev_frame = curr_frame
 
   # forward the policy network and sample an action from the returned probability
-  aprob, h = policy_forward(change_in_frame)
-  action = 2 if np.random.uniform() < aprob else 3 # roll the dice!
+  up_prob, hidden_layer_values = policy_forward(change_in_frame)
+  action = 2 if np.random.uniform() < up_prob else 3 # roll the dice!
 
   # record various intermediates (needed later for backprop)
-  xs.append(change_in_frame) # observation
-  hs.append(h) # hidden state
+  ep_observations.append(change_in_frame) # observation
+  ep_hidden_layer_values.append(hidden_layer_values) # hidden state
   y = 1 if action == 2 else 0 # a "fake label"
-  dlogps.append(y - aprob) # grad that encourages the action that was taken to be taken (see http://cs231n.github.io/neural-networks-2/#losses if confused)
+  ep_gradient_log_ps.append(y - up_prob) # grad that encourages the action that was taken to be taken (see http://cs231n.github.io/neural-networks-2/#losses if confused)
 
   # step the environment and get new measurements
   observation, reward, done, info = env.step(action)
   reward_sum += reward
 
-
-  drs.append(reward) # record reward (has to be done after we call step() to get reward for previous action)
+  ep_rewards.append(reward) # record reward (has to be done after we call step() to get reward for previous action)
 
   if done: # an episode finished
     episode_number += 1
 
     # stack together all inputs, hidden states, action gradients, and rewards for this episode
-    epx = np.vstack(xs)
-    eph = np.vstack(hs)
-    epdlogp = np.vstack(dlogps)
-    epr = np.vstack(drs)
-    xs,hs,dlogps,drs = [],[],[],[] # reset array memory
+    comb_ep_observations = np.vstack(ep_observations)
+    comb_ep_hidden_layer_values = np.vstack(ep_hidden_layer_values)
+    comb_ep_gradient_log_ps = np.vstack(ep_gradient_log_ps)
+    comb_ep_rewards = np.vstack(ep_rewards)
+    ep_observations,ep_hidden_layer_values,ep_gradient_log_ps,ep_rewards = [],[],[],[] # reset array memory
 
     # compute the discounted reward backwards through time
-    discounted_epr = discount_rewards(epr) # epr is an array of the rewards
+    discounted_comb_ep_rewards = discount_rewards(comb_ep_rewards) # comb_ep_rewards is an array of the rewards
     # standardize the rewards to be unit normal (helps control the gradient estimator variance)
-    discounted_epr -= np.mean(discounted_epr) # calculates mean and subtracts from each value
-    discounted_epr /= np.std(discounted_epr)
+    discounted_comb_ep_rewards -= np.mean(discounted_comb_ep_rewards) # calculates mean and subtracts from each value
+    discounted_comb_ep_rewards /= np.std(discounted_comb_ep_rewards)
 
-    epdlogp *= discounted_epr # modulate the gradient with advantage (PG magic happens right here.)
-    grad = policy_backward(eph, epdlogp)
+    comb_ep_gradient_log_ps *= discounted_comb_ep_rewards # modulate the gradient with advantage (PG magic happens right here.)
+    grad = policy_backward(comb_ep_hidden_layer_values, comb_ep_gradient_log_ps)
     for k in model: grad_buffer[k] += grad[k] # accumulate grad over batch
 
     # perform rmsprop parameter update every batch_size episodes
@@ -147,9 +140,18 @@ while True:
     if episode_number % 100 == 0: pickle.dump(model, open('save.p', 'wb'))
     reward_sum = 0
     observation = env.reset() # reset env
-    prev_x = None
+    prev_frame = None
 
   if reward != 0: # Pong has either +1 or -1 reward exactly when game ends.
     print('ep %d: game finished, reward: %f' %
               (episode_number, reward) + ('' if reward == -1 else ' !!!!!!!!'))
-              
+
+
+# TODO: 
+# 1. understand logp in policy_foward
+# 2. understand dh and backpropogation functions in policy_backward
+# 3. understand fake label and variable "y" on 100 & 101 
+# 4. understand what the variable "ep_gradient_log_ps" holds & rename if necessary (line 77)
+# and change comb_ep_gradient_log_ps accordingly
+# 5. understand grad_buffer 
+# 6. understand RMSprop calculations and rename variables if necessary 
