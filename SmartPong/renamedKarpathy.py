@@ -3,16 +3,17 @@ import numpy as np
 import pickle #needed to be able to visualize results when you win. 
 import gym
 import time
+from sklearn.metrics import accuracy_score
 
 
 # hyperparameters
 H = 200 # number of hidden layer neurons
-batch_size = 10 # every how many episodes to do a param update?
+batch_size = 1 # every how many episodes to do a param update?
 learning_rate = 1e-3 # a lot of the comments were saying to change this to make it faster
 gamma = 0.99 # discount factor for reward
 decay_rate = 0.99 # decay factor for RMSProp leaky sum of grad^2
-resume = False # resume from previous checkpoint?
-render = True
+resume = True # resume from previous checkpoint?
+render = False
 
 # model initialization
 D = 80 * 80 # input dimensionality: 80x80 grid
@@ -22,7 +23,7 @@ else:
   model = {}
   model['W1'] = np.random.randn(H,D) / np.sqrt(D) # "Xavier" initialization
   model['W2'] = np.random.randn(H) / np.sqrt(H) #Divide by square root of number of dimension size to normalize weights
-
+#print(model)
 grad_buffer = { k : np.zeros_like(v) for k,v in model.items() } # update buffers that add up gradients over a batch
 rmsprop_cache = { k : np.zeros_like(v) for k,v in model.items() } # rmsprop memory
 # np.zeros_like - Return an array of zeros with the same shape and type as a given array.
@@ -65,7 +66,10 @@ def policy_forward(change_in_frame):
 #comb_ep_hidden_layer_values.T and dh.T are the transposed matrices of comb_ep_hidden_layer_values and dh, respectively
 def policy_backward(comb_ep_hidden_layer_values, comb_ep_gradient_log_ps):
   """ backward pass. (comb_ep_hidden_layer_values is array of intermediate hidden states) """
+  # epdlogp is (a^L - y)
+  # eph.T is (a^(L-1))
   dC_dw2 = np.dot(comb_ep_hidden_layer_values.T, comb_ep_gradient_log_ps).ravel()
+  #print(dC_dw2.shape)
   dh = np.outer(comb_ep_gradient_log_ps, model['W2'])
   dh[comb_ep_hidden_layer_values <= 0] = 0 # backpro prelu
   dC_dw1 = np.dot(dh.T, comb_ep_observations)
@@ -75,15 +79,16 @@ env = gym.make("Pong-v0")
 observation = env.reset() # gets very first image of the game
 prev_frame = None # used in computing the difference frame 
 ep_observations,ep_hidden_layer_values,ep_gradient_log_ps,ep_rewards = [],[],[],[]
-
 running_reward = None
 reward_sum = 0
 episode_number = 0
+all_running_rewards = []
+count = -1
 
 while True:
   if render: 
     env.render()
-    #time.sleep(0.5)
+    #time.sleep(0.1)
 
   # preprocess the observation, set input to network to be difference image
   curr_frame = prepro(observation)
@@ -92,23 +97,32 @@ while True:
 
   # forward the policy network and sample an action from the returned probability
   up_prob, hidden_layer_values = policy_forward(change_in_frame)
-  action = 2 if np.random.uniform() < up_prob else 3 # roll the dice!
-
+  action = 2 if np.random.uniform() < up_prob else 3 # roll the dice! Generates random probability. This is used for exploring
+        
+  #2 means up and 3 means down
+        
   # record various intermediates (needed later for backprop)
   ep_observations.append(change_in_frame) # observation
   ep_hidden_layer_values.append(hidden_layer_values) # hidden state
-  y = 1 if action == 2 else 0 # a "fake label"
-  ep_gradient_log_ps.append(y - up_prob) # grad that encourages the action that was taken to be taken (see http://cs231n.github.io/neural-networks-2/#losses if confused)
-
+  fake_label = 1 if action == 2 else 0 # a "fake label". Our paddle only take the values of 2 and 3 so we need this.
+  #fake_label or "y" simply represents the action that we took when we saw "x" input frame
+  #fake_label_array = []
+  #fake_label_array.append(fake_label)
+  #print(fake_label_array)
+  #up_prob_array = []
+  #up_prob_array.append(up_prob)
+  ep_gradient_log_ps.append(fake_label - up_prob) # grad that encourages the action that was taken to be taken (see http://cs231n.github.io/neural-networks-2/#losses if confused)
+  #print("up prob is:", up_prob)
+  #print("ep_gradient_log_ps is:", ep_gradient_log_ps)      
+  #Stores error which is error of the cost
+  # The more negative it is, the more wrong(?). The more positive, the more wrong. Want values closer to zero.
+   
   # step the environment and get new measurements
-  observation, reward, done, info = env.step(action)
+  observation, reward, done, info = env.step(action) #This is where we tell our paddle to move up or down
   reward_sum += reward
-
   ep_rewards.append(reward) # record reward (has to be done after we call step() to get reward for previous action)
-
   if done: # an episode finished
     episode_number += 1
-
     # stack together all inputs, hidden states, action gradients, and rewards for this episode
     comb_ep_observations = np.vstack(ep_observations)
     comb_ep_hidden_layer_values = np.vstack(ep_hidden_layer_values)
@@ -122,9 +136,11 @@ while True:
     discounted_comb_ep_rewards -= np.mean(discounted_comb_ep_rewards) # calculates mean and subtracts from each value
     discounted_comb_ep_rewards /= np.std(discounted_comb_ep_rewards)
 
+    
     comb_ep_gradient_log_ps *= discounted_comb_ep_rewards # modulate the gradient with advantage (PG magic happens right here.)
+   
     grad = policy_backward(comb_ep_hidden_layer_values, comb_ep_gradient_log_ps)
-    for k in model: grad_buffer[k] += grad[k] # accumulate grad over batch
+    for k in model: grad_buffer[k] += grad[k] # accumulate grad over batch. Why? - lessens load on GPU
 
     # perform rmsprop parameter update every batch_size episodes
     if episode_number % batch_size == 0:
@@ -135,16 +151,27 @@ while True:
         grad_buffer[k] = np.zeros_like(v) # reset batch gradient buffer
 
     # boring book-keeping
-    running_reward = reward_sum if running_reward is None else running_reward * 0.99 + reward_sum * 0.01
+    running_reward = reward_sum if running_reward is None else running_reward * 0.99 + reward_sum * 0.01 #What is this
     print ('resetting env. episode reward total was %f. running mean: %f' % (reward_sum, running_reward))
     if episode_number % 100 == 0: pickle.dump(model, open('save.p', 'wb'))
     reward_sum = 0
     observation = env.reset() # reset env
     prev_frame = None
-
+    count += 1
+    summation = 0
+    for i in range(0,count):
+      difference = fake_label - up_prob
+      squared_difference = difference**2
+      summation = summation + squared_difference
+    accuracy = summation/(count+1)
+    print("accuracy is: ", accuracy)
+    if count == 6000:
+      break
   if reward != 0: # Pong has either +1 or -1 reward exactly when game ends.
-    print('ep %d: game finished, reward: %f' %
-              (episode_number, reward) + ('' if reward == -1 else ' !!!!!!!!'))
+    print('ep %d: game finished, reward: %f' % (episode_number, reward) + ('' if reward == -1 else ' !!!!!!!!'))
+
+with open("Control.txt", "wb") as fp:   #Pickling
+    pickle.dump(all_running_rewards, fp)
 
 
 # TODO: 
