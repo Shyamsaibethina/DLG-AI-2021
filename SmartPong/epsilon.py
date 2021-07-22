@@ -62,10 +62,10 @@ epsilon_interval = (
 episode_number = 0
 running_reward = None
 ep_observations, ep_rewards, ep_gradient_log_ps = [], [], []
-# Number of frames to take random action and observe output
-epsilon_random_frames = 50000
+# Number of episodes to take random action and observe output
+epsilon_random_episodes = 50000  #we can set a maximum number of episodes for exploration using this variable
 # Number of frames for exploration
-epsilon_greedy_frames = 1000000.0
+epsilon_greedy_frames = 1000000.0 #lowering this value makes epsilon decrease faster
 
 if resume:
     model.load_weights("ModelWeights")
@@ -79,7 +79,7 @@ while True:
     prev_frame = curr_frame
     ep_observations.append(change_in_frame)
     
-    if np.random.random() < epsilon:
+    if episode_number < epsilon_random_episodes or np.random.random() < epsilon:
         action = np.random.randint(2, 4)
     else:
         change_in_frame = change_in_frame.reshape((1,6400))
@@ -102,8 +102,8 @@ while True:
     reward_sum += reward
     # Decay probability of taking random action
     epsilon -= epsilon_interval / epsilon_greedy_frames
-    epsilon = max(epsilon, epsilon_min)
-    #print("epsilon is: ", epsilon)
+    epsilon = max(epsilon, epsilon_min) #this just makes sure you never go below the minimum desired epsilon
+    print("epsilon is: ", epsilon)
     if done:
         comb_ep_observations = np.vstack(ep_observations)
         comb_ep_gradient_log_ps = np.vstack(ep_gradient_log_ps)
@@ -114,7 +114,7 @@ while True:
         discounted_comb_ep_rewards -= np.mean(discounted_comb_ep_rewards) 
         discounted_comb_ep_rewards /= np.std(discounted_comb_ep_rewards)
         
-        comb_ep_gradient_log_ps *= discounted_comb_ep_rewards
+        comb_ep_gradient_log_ps = (comb_ep_gradient_log_ps * discounted_comb_ep_rewards)
         
         #model.()
         
