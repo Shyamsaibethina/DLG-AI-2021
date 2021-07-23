@@ -25,7 +25,7 @@ env.unwrapped.get_action_meanings()
 # RIGHT is the same as RIGHTFIRE (up)
 model.summary()
 def prepro(input_frame):
-    """ prepro 210x160x3 uint8 frame into 6400 (80x80) 1D float vector """
+    """ prepro 210x160x3 uint8 frame into e6400 (80x80) 1D float vector """
     input_frame = input_frame[34:194] # crop
     input_frame = input_frame[::2,::2,0] # downsample by factor of 2 (halves the resolution of the image)
     #This takes every other pixel in the image
@@ -44,16 +44,16 @@ def discount_rewards(rewards):
         discounted_r[t] = running_add
     return discounted_r
 
-render = True
+render = False
 prev_frame = None
 game_dimensions = 80*80
 gamma = 0.99
-resume = True
+resume = False
 batch_size = 10
 
 observation = env.reset()
 reward_sum = 0
-epsilon = 1.0  # Epsilon greedy parameter
+epsilon = 1  # Epsilon greedy parameter
 epsilon_min = 0.000001  # Minimum epsilon greedy parameter
 epsilon_max = 1.0  # Maximum epsilon greedy parameter
 epsilon_interval = (
@@ -65,7 +65,7 @@ ep_observations, ep_rewards, ep_gradient_log_ps = [], [], []
 # Number of episodes to take random action and observe output
 epsilon_random_episodes = 50000  #we can set a maximum number of episodes for exploration using this variable
 # Number of frames for exploration
-epsilon_greedy_frames = 100000.0 #lowering this value makes epsilon decrease faster
+epsilon_greedy_frames = 50000.0 #lowering this value makes epsilon decrease faster
 
 if resume:
     model.load_weights("ModelWeights")
