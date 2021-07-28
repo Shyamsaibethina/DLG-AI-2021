@@ -6,6 +6,10 @@ import matplotlib.pyplot as plt
 import tensorflow as tf
 import tensorflow.keras.layers as layers
 import tensorflow.keras.initializers as initializers
+#from support import save_frames_as_gif
+from matplotlib import animation
+
+
 #hello
 env = gym.make("Pong-v0")
 initializer = initializers.GlorotNormal
@@ -24,6 +28,19 @@ env.unwrapped.get_action_meanings()
 # LEFT is the same as LEFTFIRE (down)
 # RIGHT is the same as RIGHTFIRE (up)
 model.summary()
+'''def save_frames_as_gif(frames, filename=None):
+    """
+    Save a list of frames as a gif
+    """ 
+    patch = plt.imshow(frames[0])
+    plt.axis('off')
+    def animate(i):
+        patch.set_data(frames[i])
+    anim = animation.FuncAnimation(plt.gcf(), animate, frames = len(frames), interval=50)
+    if filename:
+        anim.save(filename, dpi=72, writer='imagemagick')
+'''
+
 def prepro(input_frame):
     """ prepro 210x160x3 uint8 frame into e6400 (80x80) 1D float vector """
     input_frame = input_frame[34:194] # crop
@@ -65,8 +82,8 @@ ep_observations, ep_rewards, ep_gradient_log_ps = [], [], []
 # Number of episodes to take random action and observe output
 epsilon_random_episodes = 50000  #we can set a maximum number of episodes for exploration using this variable
 # Number of frames for exploration
-epsilon_greedy_frames = 50000.0 #lowering this value makes epsilon decrease faster
-
+epsilon_greedy_frames = 100000.0 #lowering this value makes epsilon decrease faster
+#!!!!!!!frames = []
 if resume:
     model.load_weights("ModelWeights")
 
@@ -90,6 +107,7 @@ while True:
             action = 3
     
     observation, reward, done, _ = env.step(action) 
+    #frames.append(observation)
     
     y = 1 if action == 2 else 0
     
@@ -103,7 +121,7 @@ while True:
     # Decay probability of taking random action
     epsilon -= epsilon_interval / epsilon_greedy_frames
     epsilon = max(epsilon, epsilon_min) #this just makes sure you never go below the minimum desired epsilon
-    print("epsilon is: ", epsilon)
+    #print("epsilon is: ", epsilon)
     if done:
         comb_ep_observations = np.vstack(ep_observations)
         comb_ep_gradient_log_ps = np.vstack(ep_gradient_log_ps)
@@ -133,3 +151,4 @@ while True:
     
     if reward != 0: # Pong has either +1 or -1 reward exactly when game ends.
         print('ep %d: game finished, reward: %f' % (episode_number, reward) + ('' if reward == -1 else ' !!!!!!!!'))
+    #save_frames_as_gif(frames, filename = 'gif1')

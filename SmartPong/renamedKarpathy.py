@@ -5,6 +5,11 @@ import gym
 import time
 from sklearn.metrics import accuracy_score
 
+'''
+with open("Control.txt", "rb") as fp:   # Unpickling
+  b = pickle.load(fp)
+print(len(b))
+'''
 
 # hyperparameters
 H = 200 # number of hidden layer neurons
@@ -172,6 +177,7 @@ while True:
 
 with open("Control.txt", "wb") as fp:   #Pickling
     pickle.dump(all_running_rewards, fp)
+
 
 
 # TODO: 
